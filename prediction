@@ -1,0 +1,102 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score
+
+if __name__ == '__main__':
+    print("Starting data reading...")
+    # Read training data
+    train_data = pd.read_excel('Supplementary Material.xlsx')
+    print("Training data reading completed")
+
+    # Extract features and labels
+    features = train_data.iloc[:, 1:-1]  # Second column to second last column are features
+    labels = train_data.iloc[:, -1]  # Last column is label
+
+    # Standardize features
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features)
+
+    # Split training and test sets
+    X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.2, random_state=42)
+
+    # Define models and their parameters
+    model_params = {
+        'RF': {
+            'model': RandomForestClassifier(random_state=42),
+            'params': {'n_estimators': [50, 100, 200]}
+        },
+        'GBoost': {
+            'model': GradientBoostingClassifier(random_state=42),
+            'params': {'n_estimators': [50, 100, 200], 'learning_rate': [0.01, 0.1, 0.5]}
+        },
+        'LR': {
+            'model': LogisticRegression(max_iter=1000, random_state=42),
+            'params': {'C': [0.1, 1, 10]}
+        },
+        'SVM': {
+            'model': SVC(probability=True, random_state=42),
+            'params': {'C': [0.1, 1, 10], 'kernel': ['linear', 'rbf']}
+        }
+    }
+
+    # Store trained models
+    trained_models = {}
+
+    # Train models
+    for model_name, mp in model_params.items():
+        print(f"Training model: {model_name}...")
+        grid_search = GridSearchCV(mp['model'], mp['params'], cv=5, n_jobs=-1, scoring='accuracy')
+        grid_search.fit(X_train, y_train)
+
+        # Save best model
+        best_model = grid_search.best_estimator_
+        trained_models[model_name] = best_model
+
+        # Output best parameters
+        print(f"{model_name} best parameters: {grid_search.best_params_}")
+
+        # Output AUC on test set
+        y_proba = best_model.predict_proba(X_test)[:, 1]
+        auc = roc_auc_score(y_test, y_proba)
+        print(f"{model_name} test set AUC: {auc:.4f}")
+
+    print("Model training completed!")
+
+    # Read prediction data
+    print("Starting to read prediction data...")
+    predict_data = pd.read_excel('Formulation Morgan Fingerprints.xlsx')
+    print("Prediction data reading completed")
+
+    # Extract compound names and Morgan fingerprints
+    compounds = predict_data.iloc[:, 0]  # First column is compound names
+    fingerprints = predict_data.iloc[:, 1:]  # Second column to last column are 1024-bit Morgan fingerprints
+
+    # Standardize Morgan fingerprints
+    fingerprints_scaled = scaler.transform(fingerprints)
+
+    # Initialize results list
+    results = []
+
+    # Make predictions for each model
+    for model_name, model in trained_models.items():
+        print(f"Making predictions using model {model_name}...")
+        probabilities = model.predict_proba(fingerprints_scaled)[:, 1]  # Get positive class probabilities
+        results.append(probabilities)
+
+    # Save prediction results to DataFrame
+    results_df = pd.DataFrame({
+        "Compound": compounds,
+        "RF": results[0],  # Random Forest prediction probabilities
+        "GBoost": results[1],  # Gradient Boosting prediction probabilities
+        "LR": results[2],  # Logistic Regression prediction probabilities
+        "SVM": results[3],  # Support Vector Machine prediction probabilities
+    })
+
+    # Save results to Excel file
+    results_df.to_excel("Anti-tumor Prediction Probabilities.xlsx", index=False, engine='openpyxl')
+    print("Prediction results saved to 'Anti-tumor Prediction Probabilities.xlsx'")
